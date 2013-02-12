@@ -24,13 +24,13 @@ class Piwik_Trails_Controller extends Piwik_Controller
 
 	function getGraph()
 	{
-		$iIdSite = Piwik_Common::getRequestVar('idSite');
+		$idSite = Piwik_Common::getRequestVar('idSite');
 		$sDate = Piwik_Common::getRequestVar('date');
-		$bCalc = FALSE;
+		$bCalc = false;
 
 		switch( Piwik_Common::getRequestVar('period')) {
 			case 'range':
-				$bCalc = TRUE;
+				$bCalc = true;
 				$aDate = explode(',', $sDate);
 				$sStart = date('Y-m-d 00:00:00', strtotime($aDate[0]));
 				$sEnd   = date('Y-m-d 23:59:59', strtotime($aDate[0]));
@@ -60,7 +60,7 @@ class Piwik_Trails_Controller extends Piwik_Controller
                 $sSite = Piwik_FetchOne("SELECT main_url FROM ".Piwik_Common::prefixTable('site'));
                 $aHosts = array(parse_url($sSite, PHP_URL_HOST));
 
-		$aSiteHosts = Piwik_FetchAll("SELECT url FROM ".Piwik_Common::prefixTable('site_url')." WHERE idsite = ?", array($iIdSite));
+		$aSiteHosts = Piwik_FetchAll("SELECT url FROM ".Piwik_Common::prefixTable('site_url')." WHERE idsite = ?", array($idSite));
 		foreach($aSiteHosts as $aHost)
 		{
 			$aHosts[] = parse_url($aHost['url'],  PHP_URL_HOST);
@@ -72,7 +72,7 @@ class Piwik_Trails_Controller extends Piwik_Controller
 			JOIN ".Piwik_Common::prefixTable('log_action')." R ON R.idaction = L.idaction_url_ref
 			WHERE L.idsite = ? AND L.server_time BETWEEN ? AND ? 
 			GROUP BY node, node_ref
-			ORDER BY num DESC LIMIT 0, 20", array($iIdSite, $sStart, $sEnd));
+			ORDER BY num DESC LIMIT 0, 20", array($idSite, $sStart, $sEnd));
 
 		$aTrails = array('nodes' => array(), 'edges' => array());
 		$aReturn = array('data' => $aTrails);
@@ -131,8 +131,8 @@ class Piwik_Trails_Controller extends Piwik_Controller
 		{
 			$aNode = &$aTrails['nodes'][$sNode];
 			$aReturn['data']['nodes'][] = array(
-				'id' => ''.$sNode.'',
-				'label' => ''.$aNode['label'].'',
+				'id' => strval($sNode),
+				'label' => strval($aNode['label']),
 				'visits' => $aNode['visits'],
 				'bounce' => $aNode['out']/$aNode['visits']
 			);
@@ -143,9 +143,9 @@ class Piwik_Trails_Controller extends Piwik_Controller
 		{
 			$aEdge = &$aTrails['edges'][$sEdge];
 			$aReturn['data']['edges'][] =array(
-				'id' => ''.$sEdge.'',
-				'target' => ''.$aEdge['target'].'',
-				'source' => ''.$aEdge['source'].'',
+				'id' => strval($sEdge),
+				'target' => strval($aEdge['target']),
+				'source' => strval($aEdge['source']),
 				'weight' => $aEdge['weight']
 			);
 			unset($aTrails['edges'][$sEdge]);
