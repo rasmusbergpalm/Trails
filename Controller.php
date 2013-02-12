@@ -18,71 +18,138 @@ class Piwik_Trails_Controller extends Piwik_Controller
 	function index()
 	{
 		$view = Piwik_View::factory('index');
-		//$view->nonce = Piwik_Nonce::getNonce('Piwik_Feedback.sendFeedback', 3600);
-                $view->graph = $this->getGraph();
+		$view->graph = $this->getGraph();
 		echo $view->render();
 	}
 
-        function getGraph()
-        {
-                $idSite = Piwik_Common::getRequestVar('idSite');
+	function getGraph()
+	{
+		$iIdSite = Piwik_Common::getRequestVar('idSite');
+		$sDate = Piwik_Common::getRequestVar('date');
+		$bCalc = FALSE;
 
-                $actions = Piwik_FetchAll("SELECT * FROM ".Piwik_Common::prefixTable('log_action'));
-                $site = Piwik_FetchOne("SELECT main_url FROM ".Piwik_Common::prefixTable('site'));
-                $host = parse_url($site, PHP_URL_HOST);
+		switch( Piwik_Common::getRequestVar('period')) {
+			case 'range':
+				$bCalc = TRUE;
+				$aDate = explode(',', $sDate);
+				$sStart = date('Y-m-d 00:00:00', strtotime($aDate[0]));
+				$sEnd   = date('Y-m-d 23:59:59', strtotime($aDate[0]));
+				break;
+			case 'year':
+				$sSO = ' THIS YEAR';
+				$sEO = ' +1 YEAR -1 SECOND';
+				break;
+			case 'month':
+				$sSO = ' THIS MONTH';
+				$sEO = ' +1 MONTH -1 SECOND';
+				break;
+			case 'week':
+				$sSO = ' THIS WEEK';
+				$sEO = ' +1 WEEK -1 SECOND';
+				break;
+			case 'day':
+			default:
+				$sSO = '';
+				$sEO = ' +1 DAY -1 SECOND';
+		}
+		if(!$bCalc) {
+			$sStart = date('Y-m-d H:i:s', strtotime($sDate.$sSO));
+			$sEnd   = date('Y-m-d H:i:s', strtotime($sStart.$sEO));
+		}
 
-                $rmstrings = array($host, 'http://', 'www.');
-                foreach ($actions as $action){
-                    $ac[$action['idaction']] = str_replace($rmstrings, '', $action['name']);
-                }
+                $sSite = Piwik_FetchOne("SELECT main_url FROM ".Piwik_Common::prefixTable('site'));
+                $aHosts = array(parse_url($sSite, PHP_URL_HOST));
 
-                $vas = Piwik_FetchAll("SELECT idaction_url, idaction_url_ref FROM ".Piwik_Common::prefixTable('log_link_visit_action')." WHERE idsite = ?", array($idSite));
+		$aSiteHosts = Piwik_FetchAll("SELECT url FROM ".Piwik_Common::prefixTable('site_url')." WHERE idsite = ?", array($iIdSite));
+		foreach($aSiteHosts as $aHost)
+		{
+			$aHosts[] = parse_url($aHost['url'],  PHP_URL_HOST);
+		}
 
-                foreach($vas as $va){
-                    $node_id = $ac[$va['idaction_url']];
-                    if(empty($nw['nodes'][$node_id])){
-                        $nw['nodes'][$node_id]['visits'] = 1;
-                        $nw['nodes'][$node_id]['label'] = $node_id;
-                        $nw['nodes'][$node_id]['out'] = 0;
-                    }else{
-                        $nw['nodes'][$node_id]['visits']++;
-                    }
+		$aVisitActions = Piwik_FetchAll("SELECT N.name AS node, R.name AS node_ref, COUNT(1) AS num 
+			FROM ".Piwik_Common::prefixTable('log_link_visit_action')." L
+			JOIN ".Piwik_Common::prefixTable('log_action')." N ON N.idaction = L.idaction_url
+			JOIN ".Piwik_Common::prefixTable('log_action')." R ON R.idaction = L.idaction_url_ref
+			WHERE L.idsite = ? AND L.server_time BETWEEN ? AND ? 
+			GROUP BY node, node_ref
+			ORDER BY num DESC LIMIT 0, 20", array($iIdSite, $sStart, $sEnd));
 
-                    if($va['idaction_url_ref'] == 0) continue;
+		$aTrails = array('nodes' => array(), 'edges' => array());
+		$aReturn = array('data' => $aTrails);
 
-                    $edge_id = $ac[$va['idaction_url_ref']].'to'.$ac[$va['idaction_url']];
-                    if(empty($nw['edges'][$edge_id])){
-                        $nw['edges'][$edge_id] = array(
-                            'target' => $ac[$va['idaction_url']],
-                            'source' => $ac[$va['idaction_url_ref']],
-                            'weight' => 1
-                        );
-                        $nw['nodes'][$ac[$va['idaction_url_ref']]]['out'] = 1;
-                    }else{
-                        $nw['edges'][$edge_id]['weight']++;
-                        $nw['nodes'][$ac[$va['idaction_url_ref']]]['out']++;
-                    }
-                }
+		foreach(array_keys($aVisitActions) as $id)
+		{
+			$aVisitAction = &$aVisitActions[$id];
+			foreach(array('node', 'node_ref') as $k)
+			{
+				$aVisitAction[$k] = preg_replace('#^(https?://)?(www\.)?#', '', str_replace($aHosts, '', $aVisitAction[$k]));
+			}
+			$sNode = $aVisitAction['node'];
+			if(!isset($aTrails['nodes'][$sNode]))
+			{
+				$aTrails['nodes'][$sNode] = array(
+					'visits' => $aVisitAction['num'],
+					'label' => $sNode,
+					'out' => 0,
+				);
+			} else {
+				$aTrails['nodes'][$sNode]['visits'] += $aVisitAction['num'];
+			}
 
-                foreach($nw['nodes'] as $id => $n){
-                    $nw2['data']['nodes'][] =array(
-                        'id' => "$id",
-                        'label' => $n['label'],
-                        'visits' => $n['visits'],
-                        'bounce' => $n['out']/$n['visits']
-                    );
-                }
+		}
 
-                foreach($nw['edges'] as $id => $e){
-                    $nw2['data']['edges'][] =array(
-                            'id' => $id,
-                            'target' => "".$e['target']."",
-                            'source' => "".$e['source']."",
-                            'weight' => $e['weight']
-                        );
-                }
+		while($aVisitActions) 
+		{
+			$aVisitAction = array_shift($aVisitActions);
+			$sEdge = $aVisitAction['node_ref'].'_to_'.$aVisitAction['node'];
 
-                return json_encode($nw2);
+			$sNode = $aVisitAction['node_ref'];
+			if(!isset($aTrails['nodes'][$sNode]))
+			{
+				$aTrails['nodes'][$sNode] = array(
+					'visits' => $aVisitAction['num'],
+					'label' => $sNode,
+					'out' => $aVisitAction['num'],
+				);
+			} else {
+				$aTrails['nodes'][$sNode]['out'] += $aVisitAction['num'];
+			}
 
-        }
+			if(empty($aTrails['edges'][$sEdge]))
+			{
+				$aTrails['edges'][$sEdge] = array(
+					'target' => $aVisitAction['node'],
+					'source' => $aVisitAction['node_ref'],
+					'weight' => $aVisitAction['num'],
+				);
+			} else {
+				$aTrails['edges'][$sEdge]['weight']+=$aVisitAction['num'];
+			}
+		}
+
+		foreach(array_keys($aTrails['nodes']) as $sNode)
+		{
+			$aNode = &$aTrails['nodes'][$sNode];
+			$aReturn['data']['nodes'][] = array(
+				'id' => ''.$sNode.'',
+				'label' => ''.$aNode['label'].'',
+				'visits' => $aNode['visits'],
+				'bounce' => $aNode['out']/$aNode['visits']
+			);
+			unset($aTrails['nodes'][$sNode]);
+		}
+
+		foreach(array_keys($aTrails['edges']) as $sEdge)
+		{
+			$aEdge = &$aTrails['edges'][$sEdge];
+			$aReturn['data']['edges'][] =array(
+				'id' => ''.$sEdge.'',
+				'target' => ''.$aEdge['target'].'',
+				'source' => ''.$aEdge['source'].'',
+				'weight' => $aEdge['weight']
+			);
+			unset($aTrails['edges'][$sEdge]);
+		}
+		return json_encode($aReturn);
+	}
 }
